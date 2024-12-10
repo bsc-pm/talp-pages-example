@@ -1,0 +1,93 @@
+
+stages:
+  - performance
+  - deploy
+
+
+.build_bt_mz: &build_bt_mz |
+  echo "Building for machine: ${MACHINE_TAG} and problem class: ${PROBLEM_CLASS}"
+  cd src/npb-mz/NPB3.4-MZ-MPI
+  cp config/make.${MACHINE_TAG} config/make.def
+  mkdir -p bin
+  make bt-mz CLASS=${PROBLEM_CLASS}
+  cd ../../../
+
+.mestral_bt_mt_template: &mestral_bt_mt_template
+    stage: performance
+    tags:
+        - $MACHINE_TAG
+    image: bscpm/dlb-ubuntu
+    script:
+        - *build_bt_mz
+        - echo "Running Configuration $CONFIGURATION"
+        - cd benchmarks/npb-mz/class_${PROBLEM_CLASS}/mestral/${CONFIGURATION}
+        - source run.sh
+        - cd ../../../../../
+        - mkdir -p talp/npb-bt-mz/class_${PROBLEM_CLASS}/mestral
+        - cp benchmarks/npb-mz/class_${PROBLEM_CLASS}/mestral/${CONFIGURATION}/talp.json talp/npb-bt-mz/class_${PROBLEM_CLASS}/mestral/talp_$(date +"%FT%H%M")_${CI_COMMIT_SHORT_SHA}.json
+    artifacts:
+      paths:
+        - talp
+
+.mn5_bt_mt_template: &mn5_bt_mt_template
+    stage: performance
+    tags:
+        - $MACHINE_TAG
+    script:
+        - *build_bt_mz
+        - echo "Running Configuration $CONFIGURATION"
+        - cd benchmarks/npb-mz/class_${PROBLEM_CLASS}/mn5/${CONFIGURATION}
+        - sbatch -A bsc33 --qos=gp_debug --wait submit.sh || true
+        - cd ../../../../../
+        - mkdir -p talp/npb-bt-mz/class_${PROBLEM_CASS}/mn5
+        - cp benchmarks/npb-mz/class_${PROBLEM_CLASS}/mn5/${CONFIGURATION}/talp.json talp/npb-bt-mz/class_${PROBLEM_CLASS}/mn5/talp_$(date +"%FT%H%M")_${CI_COMMIT_SHORT_SHA}.json
+    artifacts:
+      paths:
+        - talp
+
+mestral_bt_mz:
+  <<: *mestral_bt_mt_template
+  variables:
+    MACHINE_TAG: "mestral"
+  parallel:
+    matrix:
+      - PROBLEM_CLASS: "B"   
+        CONFIGURATION: ["12x2","24x1"]
+
+
+
+talp-pages:
+  stage: deploy
+  image: python:3.11-slim
+  needs:
+    - job: mestral_bt_mz
+      optional: true
+      artifacts: true
+  script:
+    - pip install talp-pages
+    - talp metadata -i talp --log-level=DEBUG
+    - mkdir downloaded
+    - talp download-gitlab --gitlab-url "https://gitlab.pm.bsc.es" --project-name "dlb/talp-pages-example" --job-name $CI_JOB_NAME --gitlab-token $PAT_TOKEN --ref-name main --output-file downloaded/talp.zip --log-level=DEBUG
+    - cd downloaded
+    - unzip talp.zip || if ! [[ -d talp ]]; then mkdir talp; echo "Creating an empty talp directory --> First RUN?"; fi
+    - cp -r talp/* ../talp || true 
+    - cd ..
+    - mkdir -p public/talp
+    - talp ci-report -i talp -o public/talp --badge
+  artifacts:
+    paths:
+      - public/talp
+      - talp
+
+pages:
+  stage: deploy
+  script:
+    - echo "building pages..."
+  needs:
+    - job: talp-pages
+      optional: true
+  artifacts:
+    paths:
+      - public
+    expire_in: 5min
+
