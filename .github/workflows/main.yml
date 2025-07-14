@@ -1,0 +1,91 @@
+name: Talp Pages Example
+permissions:
+  id-token: write
+  pages: write
+  contents: read
+on: [push]
+
+jobs:
+  performance-run:
+    runs-on: ubuntu-latest
+    container:
+      image: bscpm/dlb-ubuntu
+    strategy:
+      matrix:
+        problem-class: [B]
+        configuration: ["4x1","1x4"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: .
+      - name: Run performance job for ${{ matrix.problem-class }} ${{ matrix.configuration }}
+        shell: bash
+        run: |
+          export PROBLEM_CLASS="${{ matrix.problem-class }}"
+          export CONFIGURATION="${{ matrix.configuration }}"
+          export GITHUB_SHORT_SHA="$(echo ${GITHUB_SHA} | cut -c1-8)"
+          echo "Building for machine: ghrunners and problem class: ${PROBLEM_CLASS}"
+          cd src/npb-mz/NPB3.4-MZ-MPI
+          cp config/make.ghrunners config/make.def
+          mkdir -p bin
+          make bt-mz CLASS=${PROBLEM_CLASS}
+          cd ../../../
+          cd benchmarks/npb-mz/class_${PROBLEM_CLASS}/gh-runner/${CONFIGURATION}
+          source run.sh
+          cd ../../../../../
+          mkdir -p talp/npb-bt-mz/class_${PROBLEM_CLASS}/gh-runner
+          ls benchmarks/npb-mz/class_${PROBLEM_CLASS}/gh-runner/${CONFIGURATION}
+          cp benchmarks/npb-mz/class_${PROBLEM_CLASS}/gh-runner/${CONFIGURATION}/talp.json talp/npb-bt-mz/class_${PROBLEM_CLASS}/gh-runner/talp_$(date +"%FT%H%M")_${GITHUB_SHORT_SHA}.json
+          ls talp/npb-bt-mz/class_${PROBLEM_CLASS}/gh-runner
+      - name: Upload ${{ matrix.problem-class }}  ${{ matrix.configuration }} artifact of performance run
+        uses: actions/upload-artifact@v4
+        with:
+          name: configuration_${{ matrix.configuration }}-talp-gh-runner-class_${{matrix.problem-class}}
+          path: talp/npb-bt-mz/*/gh-runner
+  talp-pages:
+    runs-on: ubuntu-latest
+    needs: performance-run
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: .
+      - name: Download current run artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: new-artifacts
+      - name: Download old artifacts
+        run: |
+          pip install talp-pages --pre
+          talp download-github --project-name="${{ github.repository }}" --workflow-name="${{ github.workflow }}" --artifact-name=talp-combined-artifacts --github-token="${{ secrets.PAT }}" --output-file=talp.zip
+      - name: Combine artifacts
+        run: |
+          export COMMIT_TIMESTAMP=$(git show -s --format=%cI ${{ github.sha }})
+          talp metadata --git-commit="${{ github.sha }}" --git-branch="${{ github.ref }}" --git-timestamp="$COMMIT_TIMESTAMP"  -i new-artifacts --log-level=DEBUG
+          unzip talp.zip || if ! [[ -d talp ]]; then mkdir talp; echo "Creating an empty talp directory --> First RUN?"; fi
+          # A bit ugly, we need to do some bash gymansics
+          mkdir -p talp/npb-bt-mz/class_B/gh-runner
+          cp -r new-artifacts/configuration_*-talp-gh-runner-class_B/* talp/npb-bt-mz/class_B/gh-runner
+          mkdir -p public/talp
+          talp ci-report -i talp -o public/talp --badge
+      - name: Upload final combined artifacts of runs
+        uses: actions/upload-artifact@v4
+        with:
+          name: talp-combined-artifacts
+          path: ./talp
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./public
+  
+  deploy-pages:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: talp-pages
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
