@@ -4,9 +4,9 @@ This repository contains an exemplary CI architecture for using TALP-Pages.
 
 ## GitHub
 
-The GitHub example workflow can be found in a [mirrored version this repository](https://github.com/valentin-seitz/talp-pages-example).
+The GitHub example workflow can be found in a [mirrored version this repository](https://github.com/bsc-pm/talp-pages-example).
 As the GitHub runners are quite restricive in terms of ressource and available features (e.g. reading performance counters) the goal is to show how TALP-Pages could be used rather than providing insight into the application benchmark.
-The resulting report page is available under: https://valentin-seitz.github.io/talp-pages-example/talp/
+The resulting report page is available under: https://bsc-pm.github.io/talp-pages-example/talp/
 
 ## GitLab
 
