@@ -63,6 +63,8 @@ talp-pages:
     - job: mestral_bt_mz
       optional: true
       artifacts: true
+  before_script:
+    - apt-get update && apt-get -y install unzip
   script:
     - pip install talp-pages
     - talp metadata -i talp --log-level=DEBUG
